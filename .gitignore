@@ -61,3 +61,8 @@ fixtures/
 /tmp/
 *.local
 .DS_Store
+
+# Environment variables and deployment logs
+.env
+day_1/deploy/*.log
+day_1/deploy/*.txt

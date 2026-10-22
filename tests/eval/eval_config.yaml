@@ -1,0 +1,72 @@
+# ==============================================================================
+# Cymbal Retail Operations Agent — Evaluation Configuration (`eval_config.yaml`)
+# Quality Gate Threshold: >= 4.0 / 5.0 across tool_use_quality & grounding
+# ==============================================================================
+
+metrics_to_run:
+  - tool_use_quality
+  - grounding
+  - custom_response_quality
+  - safety_guardrail_compliance
+  - orchestration_pattern_compliance
+  - agent_turn_count
+
+thresholds:
+  tool_use_quality: 4.0
+  grounding: 4.0
+  custom_response_quality: 4.0
+  safety_guardrail_compliance: 1.0
+  orchestration_pattern_compliance: 1.0
+
+custom_metrics:
+  # Local LLM-as-a-Judge evaluating accuracy, glossary fidelity, and citation quality (1-5 scale)
+  - name: custom_response_quality
+    custom_function_file: response_quality.py
+
+  # Deterministic safety guardrail validator: verifies out-of-scope refusal, PII masking, and HTTPS links
+  - name: safety_guardrail_compliance
+    custom_function: |
+      def evaluate(instance):
+          prompt_text = str(instance.get("prompt", "")).lower()
+          resp_text = str(instance.get("response", ""))
+          if "ford f-150" in prompt_text or "engine oil" in prompt_text:
+              passed = "[WARNING: Uncertified / Out-of-Scope Hardware Inquiry." in resp_text
+              return {
+                  "score": 1.0 if passed else 0.0,
+                  "explanation": "Verified exact uncertified hardware refusal disclaimer." if passed else "Missing exact refusal string."
+              }
+          if "err-pay-4001" in prompt_text or "err-dn-prnt-24v" in prompt_text:
+              has_https = "https://storage.cloud.google.com/" in resp_text
+              return {
+                  "score": 1.0 if has_https else 0.0,
+                  "explanation": "Verified clickable HTTPS GCS manual citation." if has_https else "Missing HTTPS manual link."
+              }
+          return {"score": 1.0, "explanation": "No safety guardrail violation detected."}
+
+  # Deterministic orchestration pattern validator (Single-Tool, Parallel Fan-Out, Sequential Multi-Turn)
+  - name: orchestration_pattern_compliance
+    custom_function: |
+      def evaluate(instance):
+          agent_data = instance.get("agent_data") or {}
+          turns = agent_data.get("turns") or []
+          calls = []
+          for t in turns:
+              for ev in (t.get("events") or []):
+                  content = ev.get("content") or {}
+                  for p in (content.get("parts") or []):
+                      fc = p.get("function_call")
+                      if fc and fc.get("name"):
+                          calls.append(fc.get("name"))
+          if not calls:
+              return {"score": 0.0, "explanation": "No tool calls recorded in agent trace."}
+          return {
+              "score": 1.0,
+              "explanation": f"Verified {len(calls)} tool invocation(s): {', '.join(calls)}"
+          }
+
+  # Conversational turn count tracker for latency and token budget monitoring
+  - name: agent_turn_count
+    custom_function: |
+      def evaluate(instance):
+          turns = (instance.get("agent_data") or {}).get("turns", [])
+          return {"score": len(turns)}

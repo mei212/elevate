@@ -1,0 +1,37 @@
+sources:
+  cymbal-bigtable-ops:
+    kind: bigtable
+    project: ${PROJECT_ID}
+    instance: ${BIGTABLE_INSTANCE_ID}
+
+tools:
+  read_cashier_realtime_alerts:
+    kind: bigtable-sql
+    source: cymbal-bigtable-ops
+    description: >-
+      Reads the latest 1-hour rolling metrics and audit status flags for a cashier
+      from Cloud Bigtable table cashier_realtime_alerts using a row key prefix
+      formatted as STORE_<ID>#CASH_<ID>.
+    statement: >-
+      SELECT
+        CAST(_key AS STRING) AS row_key,
+        CAST(flags['audit_status'] AS STRING) AS audit_status,
+        TO_FLOAT64(stats['cashier_1h_total_discount_usd']) AS cashier_1h_total_discount_usd,
+        TO_INT64(stats['cashier_1h_txn_count']) AS cashier_1h_txn_count,
+        TO_FLOAT64(stats['cashier_1h_avg_discount_pct']) AS cashier_1h_avg_discount_pct,
+        TO_INT64(stats['cashier_1h_manual_override_count']) AS cashier_1h_manual_override_count,
+        TO_INT64(stats['cashier_1h_promo_count']) AS cashier_1h_promo_count,
+        TO_FLOAT64(stats['cashier_1h_promo_rate']) AS cashier_1h_promo_rate,
+        CAST(stats['last_event_ts'] AS STRING) AS last_event_ts,
+        TO_FLOAT64(stats['risk_score']) AS risk_score
+      FROM cashier_realtime_alerts
+      WHERE CAST(_key AS STRING) LIKE CONCAT(@row_key_prefix, '%')
+      LIMIT 1
+    parameters:
+      - name: row_key_prefix
+        type: string
+        description: "Row key prefix formatted as 'STORE_<ID>#CASH_<ID>' (e.g. 'STORE_048#CASH_1190')."
+
+toolsets:
+  cymbal_bigtable_toolset:
+    - read_cashier_realtime_alerts
